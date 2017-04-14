@@ -3,11 +3,10 @@
     <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0"/>
     <open-files xmlns="http://www.netbeans.org/ns/projectui-open-files/2">
         <group>
-            <file>file:/C:/Users/ruisi/Downloads/unchanged/Microchip/Common/MSPI.c</file>
-            <file>file:/C:/Users/ruisi/Downloads/unchanged/Microchip/WirelessProtocols/P2P/P2P.c</file>
-            <file>file:/C:/Users/ruisi/Downloads/unchanged/Microchip/Common/Console.c</file>
-            <file>file:/C:/Users/ruisi/Downloads/unchanged/Microchip/Common/TimeDelay.c</file>
-            <file>file:/C:/Users/ruisi/Downloads/unchanged/Powercast/Access%20Point/AccessPoint.c</file>
+            <file>file:/C:/Projects/WirelessSensorNetwork/Microchip/WirelessProtocols/P2P/P2P.c</file>
+            <file>file:/C:/Projects/WirelessSensorNetwork/Microchip/Common/TimeDelay.c</file>
+            <file>file:/C:/Projects/WirelessSensorNetwork/Powercast/Access%20Point/AccessPoint.c</file>
+            <file>file:/C:/Projects/WirelessSensorNetwork/Microchip/Common/MSPI.c</file>
         </group>
     </open-files>
 </project-private>

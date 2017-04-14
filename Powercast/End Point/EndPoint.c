@@ -53,7 +53,7 @@
 #define CODE_VERSION 12
 
 #define RX_TIME 1
-#define SAMPLE_ADC_VALUE 9
+#define SAMPLE_ADC_VALUE 8
 #define MAX_PACKET_SIZE 50
 #define UNDEFINED 0
 
@@ -70,7 +70,7 @@ enum
     GLOBAL_ID = 0xFF
 };
 //TODO: EDIT THIS FOR UNIQUE SLAVE DEVICE
-#define UNIQUE_SLAVE SLAVE_0_ID
+#define UNIQUE_SLAVE SLAVE_1_ID
 
 
 typedef enum
@@ -115,7 +115,7 @@ static BYTE scabyResponseBuffer[MAX_PACKET_SIZE];
 /* This value indicates that the last command
    received from master was processed successfully */
 static BOOL scfSlaveStatus;
-
+static SLAVE_STATES_E sceConvertCommandToState(const COMMANDS_E keCommand);
 
 
 /*----------------------------------------------------------------------------
@@ -136,31 +136,19 @@ static void scMainInit(void)
     BYTE byI;
 
     BoardInit();
-    ConsoleInit();
     
-    // Need to change some Console parameters for XLP16 board
-#ifdef XLP16
-    U2MODEbits.RXINV = 1;
-    U2STAbits.UTXINV = 1;
-#endif
-
     /*******************************************************************/
     // Function MiApp_ProtocolInit initialize the protocol stack. The
     // only input parameter indicates if previous network configuration
     // should be restored. In this simple example, we assume that the
     // network starts from scratch.
     /*******************************************************************/
+        
+    SPI1STAT = 0x8000;  // Enable SPI bus to talk radio
     MiApp_ProtocolInit(FALSE);
     // Set default channel
-    if (MiApp_SetChannel(MYCHANNEL) == FALSE)
-    {
-        #if defined(__18CXX)
-        return;
-        #else
-        return 0;
-        #endif
-    }
-    
+    MiApp_SetChannel(MYCHANNEL);
+
     /*******************************************************************/
     // Function MiApp_ConnectionMode defines the connection mode. The
     // possible connection modes are:
@@ -213,7 +201,7 @@ int main(void)
                     if ((stReceivedMessage.Payload[SLAVE_ID_INDEX] == GLOBAL_ID) ||
                         (stReceivedMessage.Payload[SLAVE_ID_INDEX] == UNIQUE_SLAVE))
                     {
-                        eSlaveStates = eConvertCommandToState(stReceivedMessage.Payload[COMMAND_INDEX]);
+                        eSlaveStates = sceConvertCommandToState((COMMANDS_E)stReceivedMessage.Payload[COMMAND_INDEX]);
                     }
                     else
                     {
@@ -226,16 +214,20 @@ int main(void)
             case ADC_CALC:
                 scbyADCValue = scbyADCRead(0);
                 scfSlaveStatus = SLAVE_ACKNOWLEDGE;
+                eSlaveStates = INACTIVE;
                 break;
 
             case SLAVE_RES: //TODO: more work needed to make generic
-                scabyResponseBuffer = { UNIQUE_SLAVE, (BYTE)scfSlaveStatus, scbyADCValue};
+                scabyResponseBuffer[SLAVE_ID_INDEX] = UNIQUE_SLAVE;
+                scabyResponseBuffer[COMMAND_INDEX] = (BYTE)scfSlaveStatus;
+                scabyResponseBuffer[ADC_VALUE_INDEX] = scbyADCValue;
                 scTransmit((BYTE *)&scabyResponseBuffer, 3);
+                eSlaveStates = INACTIVE;
                 break;
 
             default:
                 // Error case
-                eMasterStates = INACTIVE;
+                eSlaveStates = INACTIVE;
                 break;
         }
     }
@@ -259,7 +251,7 @@ DATE             NAME               REVISION COMMENT
 04/13/2017       Ali Haidous        Initial Revision
 
 *----------------------------------------------------------------------------*/
-static SLAVE_STATES_E eConvertCommandToState(const COMMANDS_E keCommand)
+static SLAVE_STATES_E sceConvertCommandToState(const COMMANDS_E keCommand)
 {
     SLAVE_STATES_E eSlaveState = INACTIVE;
 
@@ -344,7 +336,6 @@ static BOOL scfReceive(RECEIVED_MESSAGE * stReceiveMessageBuffer)
         MiApp_DiscardMessage();
 
         fRetVal = TRUE;
-        break;
     }
 
     return fRetVal;
