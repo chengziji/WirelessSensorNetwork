@@ -416,14 +416,40 @@ static void scPrintConsole(BYTE bySlaveID, BYTE byADCHighValue, BYTE byADCLowVal
     ADCValue = ((unsigned int) byADCHighValue << 8) + byADCLowValue;
     
 //    ADCValue = (WORD)((* (long)ADCValue) / 1024);
-    ConsolePutROMString((ROM char*)"Node   ");
+    ConsolePutROMString((ROM char*)"Node ");
     
     ConsolePut(bySlaveID % 10 + '0');
     
     ConsolePutROMString((ROM char*)" | ");
     ConsolePutROMString((ROM char*)"Value   ");
     
-    ConsolePut(ADCValue % 10 + '0');
+    if ((ADCValue / 1000) != 0) 
+        {
+           	ConsolePut((ADCValue / 1000) % 10 + '0');
+           	ConsolePut((ADCValue / 100) % 10 + '0');
+           	ConsolePut((ADCValue / 10) % 10 + '0');
+        }
+        else 
+        { 
+          	ConsolePut(' ');
+                                 
+	        if ((ADCValue / 100) != 0) 
+		    {
+           		ConsolePut((ADCValue / 100) % 10 + '0');
+           		ConsolePut((ADCValue / 10) % 10 + '0');
+            }
+   	        else 
+    	    { 
+            	ConsolePut(' ');
+	    	    
+	        	if ((ADCValue / 10) != 0) 
+           			ConsolePut((ADCValue / 10) % 10 + '0');
+       			else
+	     			ConsolePut(' ');
+			}
+		}
+        ConsolePut(ADCValue % 10 + '0');
+            
     
     ConsolePutROMString((ROM char*)" | \r\n");
 }
