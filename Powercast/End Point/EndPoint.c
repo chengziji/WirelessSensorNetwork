@@ -44,23 +44,23 @@
 #include <math.h>
 
 /* -- DEFINES and ENUMS -- */
-#define VBG_VAL         1228800UL   // VBG = 1.2V, VBG_VAL = 1200 mV * 1024 counts
-#define T_BIAS          10000.0     // Bias res for temp sensor
-#define B_CONST         3380.0      // B Constant of thermistor
-#define R_0             10000.0     // Thermistor resistance at 25C
-#define T_0             298.15      // Temp in kelvin at 25C
-#define MYCHANNEL 25
-#define CODE_VERSION 12
-
-#define RX_TIME 1
-#define SAMPLE_ADC_VALUE 8
-#define MAX_PACKET_SIZE 50
-#define UNDEFINED 0
+#define VBG_VAL             1228800UL   // VBG = 1.2V, VBG_VAL = 1200 mV * 1024 counts
+#define T_BIAS              10000.0     // Bias res for temp sensor
+#define B_CONST             3380.0      // B Constant of thermistor
+#define R_0                 10000.0     // Thermistor resistance at 25C
+#define T_0                 298.15      // Temp in kelvin at 25C
+#define MYCHANNEL           25
+#define CODE_VERSION        12
+#define EXT_CHANNEL         2  
+#define RX_TIME             1
+#define SAMPLE_ADC_VALUE    8
+#define MAX_PACKET_SIZE     50          // Maxmium Size in one packet
+#define MAX_DATA_SIZE       24          // Maxmium ADC Data Size 
+#define UNDEFINED           0
+#define HEADERCOOMANDSIZE       2
 
 /* Uncomment for debugging */
 //#define DEBUG
-
-
 enum
 {
     SLAVE_0_ID,
@@ -84,7 +84,8 @@ enum
 {
     SLAVE_ID_INDEX,
     COMMAND_INDEX,
-    ADC_VALUE_INDEX
+    ADC_VALUEHIGH_INDEX,                        // High bytes
+    ADC_VALUELOW_INDEX                          // Low bytes               
 };
 
 /* -- TYPEDEFS and STRUCTURES -- */
@@ -102,15 +103,19 @@ typedef enum
 } SLAVE_RES_STATES_E;
 
 /* -- STATIC AND GLOBAL VARIABLES -- */
-
-
+static int  scu32ADCValue[40]; 
+static BYTE scabyResponseBuffer[MAX_PACKET_SIZE];
+static BYTE scADCH[40];
+static BYTE scADCL[40];
+unsigned int DataCount = 0;
 /* -- STATIC FUNCTION PROTOTYPES -- */
 static void scMainInit(void);
 static void scTransmit(BYTE *pbyTxBuffer, BYTE byLength);
 static BOOL scfReceive(RECEIVED_MESSAGE *stReceiveMessageBuffer);
-static BYTE scbyADCRead(WORD wChannel);
-static BYTE scbyADCValue;
-static BYTE scabyResponseBuffer[MAX_PACKET_SIZE];
+static int scu32ADCRead(WORD wChannel);
+static void scAllocateRespondBuffer(void);
+
+
 
 /* This value indicates that the last command
    received from master was processed successfully */
@@ -161,7 +166,7 @@ static void scMainInit(void)
     MiApp_ConnectionMode(ENABLE_ALL_CONN);
 
     /* Initialize static variables */
-    scbyADCValue = 0;
+    scu32ADCValue [40] = 0 ;
     scfSlaveStatus = SLAVE_NO_ACKNOWLEDGE;
 
     for (byI = 0; byI < sizeof(scabyResponseBuffer); byI++)
@@ -211,17 +216,21 @@ int main(void)
 
                 break;
 
-            case ADC_CALC:
-                scbyADCValue = scbyADCRead(0);
+            case ADC_CALC:                     
+                for ( DataCount =0;DataCount<MAX_DATA_SIZE;DataCount++)
+                {
+                    scu32ADCValue[DataCount] = scu32ADCRead(EXT_CHANNEL); 
+                    scADCH[DataCount] = scu32ADCValue[DataCount] >> 8;
+                    scADCL[DataCount] = scu32ADCValue[DataCount];
+                }
+                DataCount = 0;
                 scfSlaveStatus = SLAVE_ACKNOWLEDGE;
                 eSlaveStates = INACTIVE;
                 break;
 
             case SLAVE_RES: //TODO: more work needed to make generic
-                scabyResponseBuffer[SLAVE_ID_INDEX] = UNIQUE_SLAVE;
-                scabyResponseBuffer[COMMAND_INDEX] = (BYTE)scfSlaveStatus;
-                scabyResponseBuffer[ADC_VALUE_INDEX] = scbyADCValue;
-                scTransmit((BYTE *)&scabyResponseBuffer, 3);
+                scAllocateRespondBuffer();
+                scTransmit((BYTE *)&scabyResponseBuffer, MAX_PACKET_SIZE);
                 eSlaveStates = INACTIVE;
                 break;
 
@@ -344,13 +353,13 @@ static BOOL scfReceive(RECEIVED_MESSAGE * stReceiveMessageBuffer)
 
 /*----------------------------------------------------------------------------
  
-@Prototype: static BYTE scbyADCRead(WORD wChannel)
+@Prototype: static int scu32ADCRead(WORD wADCChannel)
  
 @Description: Read an ADC value from a given ADC channel
 
 @Parameters: WORD wADCChannel - ADC Channel 
  
-@Returns: BYTE: The ADC value
+@Returns: int: The ADC value - the microcontroller has 10 bit adc, hence byte is not correct type 
            
 
 @Revision History:
@@ -358,26 +367,54 @@ DATE             NAME               REVISION COMMENT
 04/12/2017       Ali Haidous        Initial Revision
 
 *----------------------------------------------------------------------------*/
-static BYTE scbyADCRead(WORD wADCChannel)
+static int scu32ADCRead(WORD wADCChannel)
 {
     WORD wI = 0;
-    BYTE byADCVal = SAMPLE_ADC_VALUE;
+    int u32ADCVal = 0;
+//    BYTE byADCVal = SAMPLE_ADC_VALUE;
 
-#if 0
+//#if 0
     AD1CHS = wADCChannel;           // set channel to measure 
     AD1CON1bits.ADON = 1;        // turn ADC on for taking readings
     for (wI = 0; wI < 50; wI++);
     AD1CON1bits.SAMP = 1;       // start sampling
     while (!AD1CON1bits.DONE);  // wait for ADC to complete
-    byADCVal = ADC1BUF0;
+    u32ADCVal = ADC1BUF0;
     AD1CON1bits.ADON = 0;       // turn ADC off for before taking next reading
-#endif
+//#endif
 
     /* TODO: GET RID OF THIS, FOR SIMULATION PURPOSES ONLY */
-    (void)wADCChannel;
-    DelayMs(100);
+//    (void)wADCChannel;
+//    DelayMs(100);
 
+    return u32ADCVal;
+}
 
-    return byADCVal;
+/*----------------------------------------------------------------------------
+ 
+@Prototype: static void scAllocateRespondBuffer(void)
+ 
+@Description: allocate the ADC data to RespondBuffer
+
+@Parameters: None 
+ 
+@Returns: None
+           
+
+@Revision History:
+DATE             NAME               REVISION COMMENT
+04/18/2017       Ruisi Ge           Initial Revision
+
+*----------------------------------------------------------------------------*/
+static void scAllocateRespondBuffer(void)
+{
+    int DataCount;
+    scabyResponseBuffer[SLAVE_ID_INDEX] = UNIQUE_SLAVE;
+    scabyResponseBuffer[COMMAND_INDEX] = (BYTE)scfSlaveStatus;
+    for (DataCount=0;DataCount< MAX_DATA_SIZE;DataCount++)
+    {
+    scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE] = scADCH[DataCount];
+    scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE+1] = scADCL[DataCount];
+    }
 }
 

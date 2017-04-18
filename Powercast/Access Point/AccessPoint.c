@@ -77,7 +77,8 @@ enum
 {
     SLAVE_ID_INDEX,
     COMMAND_INDEX,
-    ADC_VALUE_INDEX
+    ADC_VALUEHIGH_INDEX,
+    ADC_VALUELOW_INDEX
 };
 
 /* -- TYPEDEFS and STRUCTURES -- */
@@ -103,7 +104,7 @@ static void scTransmit(BYTE *pbyTxBuffer, BYTE byLength);
 static BOOL scfReceive(RECEIVED_MESSAGE *stReceiveMessageBuffer);
 static void scDoGlobalADCRequest(void);
 static void scReqSlaveStatus(const BYTE kbySlaveID);
-static void scPrintConsole(BYTE bySlaveID, BYTE byADCValue);
+static void scPrintConsole(BYTE bySlaveID, BYTE byADCHighValue, BYTE byADCLowValue);
 
 
 /*----------------------------------------------------------------------------
@@ -237,12 +238,13 @@ int main(void)
 
                                 case SLAVE_ACKNOWLEDGE:
                                     ConsolePutROMString((ROM char *)"SLAVE_ACKNOWLEDGE\r\n");
-                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUE_INDEX]);
+                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUEHIGH_INDEX],stReceivedMessage.Payload[ADC_VALUELOW_INDEX]);
                                     break;
 
                                 default:
                                     ConsolePutROMString((ROM char *)"ERROR CASE, COMMAND_INDEX invalid\r\n");
-                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUE_INDEX]);
+                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUEHIGH_INDEX],stReceivedMessage.Payload[ADC_VALUELOW_INDEX]);
+                                    
                                     break;
                             }
                         }
@@ -398,7 +400,8 @@ static void scReqSlaveStatus(const BYTE kbySlaveID)
 @Description: Pretty print some information to console
 
 @Parameters: BYTE bySlaveID 
-             BYTE byADCValue
+             BYTE byADCHighValue
+ *           BYTE byADCLowValue
 
 @Returns: void
 
@@ -407,9 +410,12 @@ DATE             NAME               REVISION COMMENT
 04/07/2017       Ali Haidous        Initial Revision
 
 *----------------------------------------------------------------------------*/
-static void scPrintConsole(BYTE bySlaveID, BYTE byADCValue)
+static void scPrintConsole(BYTE bySlaveID, BYTE byADCHighValue, BYTE byADCLowValue)
 {
+    unsigned int ADCValue = 0;
+    ADCValue = ((unsigned int) byADCHighValue << 8) + byADCLowValue;
     
+//    ADCValue = (WORD)((* (long)ADCValue) / 1024);
     ConsolePutROMString((ROM char*)"Node   ");
     
     ConsolePut(bySlaveID % 10 + '0');
@@ -417,7 +423,7 @@ static void scPrintConsole(BYTE bySlaveID, BYTE byADCValue)
     ConsolePutROMString((ROM char*)" | ");
     ConsolePutROMString((ROM char*)"Value   ");
     
-    ConsolePut(byADCValue % 10 + '0');
+    ConsolePut(ADCValue % 10 + '0');
     
     ConsolePutROMString((ROM char*)" | \r\n");
 }
