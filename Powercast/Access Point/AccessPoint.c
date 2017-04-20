@@ -44,16 +44,17 @@
 #include <math.h>
 
 /* -- DEFINES and ENUMS -- */
-#define VBG_VAL         1228800UL   // VBG = 1.2V, VBG_VAL = 1200 mV * 1024 counts
-#define T_BIAS          10000.0     // Bias res for temp sensor
-#define B_CONST         3380.0      // B Constant of thermistor
-#define R_0             10000.0     // Thermistor resistance at 25C
-#define T_0             298.15      // Temp in kelvin at 25C
-#define MYCHANNEL 25
-#define CODE_VERSION 12
-
-#define ADC_CALC_MAX_TIME_MS 200
-#define RX_TIME 1
+#define VBG_VAL                     1228800UL   // VBG = 1.2V, VBG_VAL = 1200 mV * 1024 counts
+#define T_BIAS                      10000.0     // Bias res for temp sensor
+#define B_CONST                     3380.0      // B Constant of thermistor
+#define R_0                         10000.0     // Thermistor resistance at 25C
+#define T_0                         298.15      // Temp in kelvin at 25C
+#define MYCHANNEL                   25
+#define CODE_VERSION                15
+#define MAX_DATA_PACKET             24
+#define ADC_CALC_MAX_TIME_MS        200
+#define RX_TIME                     1
+#define HEADERCOOMANDSIZE           2
 #define DEBUG
 
 enum
@@ -96,7 +97,9 @@ typedef enum
 
 /* -- STATIC AND GLOBAL VARIABLES -- */
 static const BYTE kabySlaves[] = { SLAVE_0_ID, SLAVE_1_ID };
-
+ static int  ADCValue[MAX_DATA_PACKET] ;
+ static BYTE byADCHighValue[MAX_DATA_PACKET];
+ static BYTE byADCLowValue[MAX_DATA_PACKET];
 
 /* -- STATIC FUNCTION PROTOTYPES -- */
 static void scMainInit(void);
@@ -104,7 +107,7 @@ static void scTransmit(BYTE *pbyTxBuffer, BYTE byLength);
 static BOOL scfReceive(RECEIVED_MESSAGE *stReceiveMessageBuffer);
 static void scDoGlobalADCRequest(void);
 static void scReqSlaveStatus(const BYTE kbySlaveID);
-static void scPrintConsole(BYTE bySlaveID, BYTE byADCHighValue, BYTE byADCLowValue);
+static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer,int DataCount);
 
 
 /*----------------------------------------------------------------------------
@@ -161,6 +164,7 @@ static void scMainInit(void)
         #if defined(__18CXX)
         return;
         #else
+
         return 0;
         #endif
     }
@@ -197,6 +201,8 @@ int main(void)
     BYTE bySlaveIndex = 0;
     
     RECEIVED_MESSAGE stReceivedMessage = (RECEIVED_MESSAGE) {0};
+    
+  
 
     MASTER_STATES_E eMasterStates = REQ_ADC_CALC;
 
@@ -236,15 +242,20 @@ int main(void)
                                     eMasterStates = REQ_ADC_CALC;
                                     break;
 
-                                case SLAVE_ACKNOWLEDGE:
+                                case SLAVE_ACKNOWLEDGE:                                    
                                     ConsolePutROMString((ROM char *)"SLAVE_ACKNOWLEDGE\r\n");
-                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUEHIGH_INDEX],stReceivedMessage.Payload[ADC_VALUELOW_INDEX]);
+                                    int DataCount =0;
+                                    for( DataCount;DataCount<MAX_DATA_PACKET;DataCount++)
+                                    {
+                                        scPrintConsole(bySlaveIndex,stReceivedMessage,DataCount);
+//                                        ConsolePutROMString((ROM char *)"work\r\n");
+                                    }                                  
                                     break;
 
                                 default:
                                     ConsolePutROMString((ROM char *)"ERROR CASE, COMMAND_INDEX invalid\r\n");
-                                    scPrintConsole(bySlaveIndex, stReceivedMessage.Payload[ADC_VALUEHIGH_INDEX],stReceivedMessage.Payload[ADC_VALUELOW_INDEX]);
-                                    
+                                     scPrintConsole(bySlaveIndex,stReceivedMessage,DataCount);
+                                   
                                     break;
                             }
                         }
@@ -392,7 +403,6 @@ static void scReqSlaveStatus(const BYTE kbySlaveID)
     scTransmit((BYTE *)&kabyDataBuffer, sizeof(kabyDataBuffer));
 }
 
-
 /*----------------------------------------------------------------------------
  
 @Prototype: static void scPrintConsole(BYTE bySlaveID, BYTE byADCValue)
@@ -400,57 +410,29 @@ static void scReqSlaveStatus(const BYTE kbySlaveID)
 @Description: Pretty print some information to console
 
 @Parameters: BYTE bySlaveID 
-             BYTE byADCHighValue
- *           BYTE byADCLowValue
-
+            RECEIVED_MESSAGE * stReceiveMessageBuffer - Out parameter for the 
+             received message. 
 @Returns: void
 
 @Revision History:
 DATE             NAME               REVISION COMMENT
 04/07/2017       Ali Haidous        Initial Revision
+04/18/2017       Ruisi Ge           updated Revision for multiple data
 
 *----------------------------------------------------------------------------*/
-static void scPrintConsole(BYTE bySlaveID, BYTE byADCHighValue, BYTE byADCLowValue)
-{
-    unsigned int ADCValue = 0;
-    ADCValue = ((unsigned int) byADCHighValue << 8) + byADCLowValue;
-    
-//    ADCValue = (WORD)((* (long)ADCValue) / 1024);
-    ConsolePutROMString((ROM char*)"Node ");
-    
+static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer,int DataCount)
+{   
+    byADCHighValue[DataCount]=stReceivedMessageBuffer.Payload[HEADERCOOMANDSIZE*DataCount+HEADERCOOMANDSIZE];
+    byADCLowValue[DataCount]=stReceivedMessageBuffer.Payload[HEADERCOOMANDSIZE*DataCount+HEADERCOOMANDSIZE+1];
+    ADCValue[DataCount]= ((unsigned int) byADCHighValue[DataCount] << 8) + byADCLowValue[DataCount];
+    char str[100];
+    ConsolePutROMString((ROM char*)"Node ");   
     ConsolePut(bySlaveID % 10 + '0');
-    
     ConsolePutROMString((ROM char*)" | ");
-    ConsolePutROMString((ROM char*)"Value   ");
-    
-    if ((ADCValue / 1000) != 0) 
-        {
-           	ConsolePut((ADCValue / 1000) % 10 + '0');
-           	ConsolePut((ADCValue / 100) % 10 + '0');
-           	ConsolePut((ADCValue / 10) % 10 + '0');
-        }
-        else 
-        { 
-          	ConsolePut(' ');
-                                 
-	        if ((ADCValue / 100) != 0) 
-		    {
-           		ConsolePut((ADCValue / 100) % 10 + '0');
-           		ConsolePut((ADCValue / 10) % 10 + '0');
-            }
-   	        else 
-    	    { 
-            	ConsolePut(' ');
-	    	    
-	        	if ((ADCValue / 10) != 0) 
-           			ConsolePut((ADCValue / 10) % 10 + '0');
-       			else
-	     			ConsolePut(' ');
-			}
-		}
-        ConsolePut(ADCValue % 10 + '0');
-            
-    
-    ConsolePutROMString((ROM char*)" | \r\n");
+    ConsolePutROMString((ROM char*)"Value  ");
+    sprintf(str, "%d", ADCValue[DataCount]);
+    ConsolePutROMString((ROM char*)str); 
+    ConsolePutROMString((ROM char*)" | ");   
+//    
 }
 

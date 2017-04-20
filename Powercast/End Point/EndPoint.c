@@ -53,11 +53,11 @@
 #define CODE_VERSION        12
 #define EXT_CHANNEL         2  
 #define RX_TIME             1
-#define SAMPLE_ADC_VALUE    8
+#define SAMPLE_ADC_VALUE    5
 #define MAX_PACKET_SIZE     50          // Maxmium Size in one packet
 #define MAX_DATA_SIZE       24          // Maxmium ADC Data Size 
 #define UNDEFINED           0
-#define HEADERCOOMANDSIZE       2
+#define HEADERCOOMANDSIZE   2
 
 /* Uncomment for debugging */
 //#define DEBUG
@@ -103,10 +103,10 @@ typedef enum
 } SLAVE_RES_STATES_E;
 
 /* -- STATIC AND GLOBAL VARIABLES -- */
-static int  scu32ADCValue[40]; 
+static int  scu32ADCValue[24]; 
 static BYTE scabyResponseBuffer[MAX_PACKET_SIZE];
-static BYTE scADCH[40];
-static BYTE scADCL[40];
+static BYTE scADCH[24];
+static BYTE scADCL[24];
 unsigned int DataCount = 0;
 /* -- STATIC FUNCTION PROTOTYPES -- */
 static void scMainInit(void);
@@ -370,10 +370,10 @@ DATE             NAME               REVISION COMMENT
 static int scu32ADCRead(WORD wADCChannel)
 {
     WORD wI = 0;
-    int u32ADCVal = 0;
+    int u32ADCVal = SAMPLE_ADC_VALUE;
 //    BYTE byADCVal = SAMPLE_ADC_VALUE;
 
-//#if 0
+#if 0
     AD1CHS = wADCChannel;           // set channel to measure 
     AD1CON1bits.ADON = 1;        // turn ADC on for taking readings
     for (wI = 0; wI < 50; wI++);
@@ -381,15 +381,14 @@ static int scu32ADCRead(WORD wADCChannel)
     while (!AD1CON1bits.DONE);  // wait for ADC to complete
     u32ADCVal = ADC1BUF0;
     AD1CON1bits.ADON = 0;       // turn ADC off for before taking next reading
-//#endif
+#endif
 
     /* TODO: GET RID OF THIS, FOR SIMULATION PURPOSES ONLY */
-//    (void)wADCChannel;
-//    DelayMs(100);
+    (void)wADCChannel;
+    DelayMs(50);
 
     return u32ADCVal;
 }
-
 /*----------------------------------------------------------------------------
  
 @Prototype: static void scAllocateRespondBuffer(void)
