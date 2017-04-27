@@ -41,6 +41,7 @@
 #include "ConfigApp.h"
 #include "HardwareProfile.h"
 #include "WirelessProtocols\MCHP_API.h"
+#include <stdint.h>
 #include <math.h>
 
 /* -- DEFINES and ENUMS -- */
@@ -51,10 +52,12 @@
 #define T_0                         298.15      // Temp in kelvin at 25C
 #define MYCHANNEL                   25
 #define CODE_VERSION                15
-#define MAX_DATA_PACKET             24
+#define MAX_PACKET_SIZE             50         
+#define MAX_DATA_PACKET             22          // Max data packet= (MAX_PACKET_SIZE-HEADERCOOMANDSIZE)/2
 #define ADC_CALC_MAX_TIME_MS        200
+#define SELF_CALIBRATE_MAX_TIME_MS  150
 #define RX_TIME                     1
-#define HEADERCOOMANDSIZE           2
+#define HEADERCOOMANDSIZE           6
 #define DEBUG
 
 enum
@@ -69,8 +72,7 @@ enum
 enum
 {
     CALC_ADC_CMD,
-    REQ_STATUS_CMD,
-    
+    REQ_STATUS_CMD,    
 };
 
 
@@ -78,8 +80,10 @@ enum
 {
     SLAVE_ID_INDEX,
     COMMAND_INDEX,
-    ADC_VALUEHIGH_INDEX,
-    ADC_VALUELOW_INDEX
+    TIME_1_BYTE,
+    TIME_2_BYTE,
+    TIME_3_BYTE,
+    TIME_4_BYTE,
 };
 
 /* -- TYPEDEFS and STRUCTURES -- */
@@ -96,18 +100,24 @@ typedef enum
 } SLAVE_RES_STATES_E;
 
 /* -- STATIC AND GLOBAL VARIABLES -- */
-static const BYTE kabySlaves[] = { SLAVE_0_ID, SLAVE_1_ID };
+
+ static const BYTE kabySlaves[] = { SLAVE_0_ID, SLAVE_1_ID };
  static int  ADCValue[MAX_DATA_PACKET] ;
+ static unsigned long TotalHundredMicroseconds; 
+ static double TotalSeconds;
+ static BYTE byHundredMicroseconds1stByte;        // First Byte for Milliseconds 
+ static BYTE byHundredMicroseconds2ndByte;       // Second Byte for Milliseconds
+ static BYTE byHundredMicroseconds3rdByte;      //  Third Byte for Milliseconds
+ static BYTE byHundredMicroseconds4thByte;     //  Fourth Byte for Milliseconds
  static BYTE byADCHighValue[MAX_DATA_PACKET];
  static BYTE byADCLowValue[MAX_DATA_PACKET];
-
 /* -- STATIC FUNCTION PROTOTYPES -- */
 static void scMainInit(void);
 static void scTransmit(BYTE *pbyTxBuffer, BYTE byLength);
 static BOOL scfReceive(RECEIVED_MESSAGE *stReceiveMessageBuffer);
 static void scDoGlobalADCRequest(void);
 static void scReqSlaveStatus(const BYTE kbySlaveID);
-static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer,int DataCount);
+static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer);
 
 
 /*----------------------------------------------------------------------------
@@ -125,6 +135,11 @@ DATE             NAME               REVISION COMMENT
 *----------------------------------------------------------------------------*/
 static void scMainInit(void)
 {
+    /* Function Static variables */
+    
+    /* Local Variables */
+    
+    
     BoardInit();
     ConsoleInit();
     
@@ -197,17 +212,13 @@ DATE             NAME               REVISION COMMENT
 *----------------------------------------------------------------------------*/
 int main(void)
 {
+    /* Function Static variables */
     
+    /* Local Variables */
     BYTE bySlaveIndex = 0;
-    
     RECEIVED_MESSAGE stReceivedMessage = (RECEIVED_MESSAGE) {0};
-    
-  
-
-    MASTER_STATES_E eMasterStates = REQ_ADC_CALC;
-
+    MASTER_STATES_E eMasterStates = REQ_ADC_CALC;   
     scMainInit();
-
     while(TRUE)
     {
         switch(eMasterStates)
@@ -217,8 +228,8 @@ int main(void)
 //               ConsolePutROMString((ROM char *)"REQ_ADC_CALC\r\n");
 //#endif /* ifndef DEBUG */
                
+               DelayMs(SELF_CALIBRATE_MAX_TIME_MS);    
                scDoGlobalADCRequest();
-
                DelayMs(ADC_CALC_MAX_TIME_MS);            
                eMasterStates = REQ_SLAVE_RES;
                break;
@@ -243,18 +254,13 @@ int main(void)
                                     break;
 
                                 case SLAVE_ACKNOWLEDGE:                                    
-                                    ConsolePutROMString((ROM char *)"SLAVE_ACKNOWLEDGE\r\n");
-                                    int DataCount =0;
-                                    for( DataCount;DataCount<MAX_DATA_PACKET;DataCount++)
-                                    {
-                                        scPrintConsole(bySlaveIndex,stReceivedMessage,DataCount);
-//                                        ConsolePutROMString((ROM char *)"work\r\n");
-                                    }                                  
+                                    ConsolePutROMString((ROM char *)"SLAVE_ACKNOWLEDGE\r\n"); 
+                                    scPrintConsole(bySlaveIndex,stReceivedMessage);                                
                                     break;
 
                                 default:
                                     ConsolePutROMString((ROM char *)"ERROR CASE, COMMAND_INDEX invalid\r\n");
-                                     scPrintConsole(bySlaveIndex,stReceivedMessage,DataCount);
+                                     scPrintConsole(bySlaveIndex,stReceivedMessage);
                                    
                                     break;
                             }
@@ -410,8 +416,8 @@ static void scReqSlaveStatus(const BYTE kbySlaveID)
 @Description: Pretty print some information to console
 
 @Parameters: BYTE bySlaveID 
-            RECEIVED_MESSAGE * stReceiveMessageBuffer - Out parameter for the 
-             received message. 
+             RECEIVED_MESSAGE * stReceiveMessageBuffer *  - Out parameter for the received message.
+             int DataCount 
 @Returns: void
 
 @Revision History:
@@ -420,19 +426,32 @@ DATE             NAME               REVISION COMMENT
 04/18/2017       Ruisi Ge           updated Revision for multiple data
 
 *----------------------------------------------------------------------------*/
-static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer,int DataCount)
-{   
-    byADCHighValue[DataCount]=stReceivedMessageBuffer.Payload[HEADERCOOMANDSIZE*DataCount+HEADERCOOMANDSIZE];
-    byADCLowValue[DataCount]=stReceivedMessageBuffer.Payload[HEADERCOOMANDSIZE*DataCount+HEADERCOOMANDSIZE+1];
-    ADCValue[DataCount]= ((unsigned int) byADCHighValue[DataCount] << 8) + byADCLowValue[DataCount];
+static void scPrintConsole(BYTE bySlaveID,RECEIVED_MESSAGE stReceivedMessageBuffer)
+{   BYTE byDataCount;
+    byHundredMicroseconds1stByte=stReceivedMessageBuffer.Payload[TIME_1_BYTE];
+    byHundredMicroseconds2ndByte=stReceivedMessageBuffer.Payload[TIME_2_BYTE];
+    byHundredMicroseconds3rdByte=stReceivedMessageBuffer.Payload[TIME_3_BYTE];
+    byHundredMicroseconds4thByte=stReceivedMessageBuffer.Payload[TIME_4_BYTE];
+    TotalHundredMicroseconds = ((unsigned long)byHundredMicroseconds1stByte<<24)+((unsigned long)byHundredMicroseconds2ndByte<<16)+((unsigned int)byHundredMicroseconds3rdByte<<8)+byHundredMicroseconds4thByte;
+//    TotalSeconds=TotalHundredMicroseconds;
     char str[100];
     ConsolePutROMString((ROM char*)"Node ");   
     ConsolePut(bySlaveID % 10 + '0');
     ConsolePutROMString((ROM char*)" | ");
-    ConsolePutROMString((ROM char*)"Value  ");
-    sprintf(str, "%d", ADCValue[DataCount]);
-    ConsolePutROMString((ROM char*)str); 
-    ConsolePutROMString((ROM char*)" | ");   
-//    
+    ConsolePutROMString((ROM char*)"Start Time ");
+//    sprintf(str,"%f",TotalSeconds);
+    sprintf(str,"%lu",TotalHundredMicroseconds);
+    ConsolePutROMString((ROM char*)str);
+    ConsolePutROMString((ROM char*)" | ");
+    for(byDataCount=0;byDataCount<MAX_DATA_PACKET;byDataCount++)
+        {
+            byADCHighValue[byDataCount]=stReceivedMessageBuffer.Payload[2*byDataCount+HEADERCOOMANDSIZE];
+            byADCLowValue[byDataCount]=stReceivedMessageBuffer.Payload[2*byDataCount+HEADERCOOMANDSIZE+1];
+            ADCValue[byDataCount]= ((unsigned int) byADCHighValue[byDataCount] << 8) + byADCLowValue[byDataCount];
+            ConsolePutROMString((ROM char*)"Value  ");
+            sprintf(str, "%d", ADCValue[byDataCount]);
+            ConsolePutROMString((ROM char*)str); 
+            ConsolePutROMString((ROM char*)" | ");   
+        }       
 }
 
