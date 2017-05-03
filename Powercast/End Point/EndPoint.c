@@ -45,19 +45,16 @@
 #include <math.h>
 
 /* -- DEFINES and ENUMS -- */
-#define VBG_VAL             1228800UL   // VBG = 1.2V, VBG_VAL = 1200 mV * 1024 counts
-#define T_BIAS              10000.0     // Bias res for temp sensor
-#define B_CONST             3380.0      // B Constant of thermistor
-#define R_0                 10000.0     // Thermistor resistance at 25C
-#define T_0                 298.15      // Temp in kelvin at 25C
 #define MYCHANNEL           25
 #define EXT_CHANNEL         2  
 #define SAMPLE_ADC_VALUE    5
 #define SELF_CALIBRATE_MAX_TIME_MS    150
 #define MAX_PACKET_SIZE     50          // Maxmium Size in one packet
 #define MAX_DATA_SIZE       22          // Maxmium ADC Data Size =  (MAX_PACKET_SIZE-HEADERCOOMANDSIZE)/2
+#define MAX_PACKET_SEQUENCE 5 
 #define UNDEFINED           0
-#define HEADERCOOMANDSIZE   6
+#define HEADERCOOMANDSIZE   3         // header include 1 BYTE DEVICE ID,1 BYTE COMMAND, 1 BYTE SEQUENCE, 4 BYTE TIME  
+#define TIMEHEADERSIZE      4         // Timer header include 4 byte timer header size
 
 /* Uncomment for debugging */
 //#define DEBUG
@@ -76,12 +73,11 @@ enum
 {
     SLAVE_ID_INDEX,
     COMMAND_INDEX,
+    SEQUENCE_INDEX,
     TIME_1_BYTE,
     TIME_2_BYTE,
     TIME_3_BYTE,
     TIME_4_BYTE,
-    ADC_VALUEHIGH_INDEX,                        // High bytes for ADC Value 
-    ADC_VALUELOW_INDEX                          // Low bytes  for ADC value              
 };
 
 /* -- TYPEDEFS and STRUCTURES -- */
@@ -90,7 +86,7 @@ typedef enum
     INACTIVE,
     SELF_CALIBRATE,
     ADC_CALC,
-    SLAVE_RES
+    SLAVE_RES,
 } SLAVE_STATES_E;
 
 typedef enum
@@ -109,21 +105,21 @@ typedef enum
 typedef enum
 {
     CALC_ADC_CMD,
-    REQ_STATUS_CMD
+    REQ_STATUS_CMD,
+    REQ_MISS_MESSAGE_CMD
 } COMMANDS_E;
 
 /* -- STATIC AND GLOBAL VARIABLES -- */
 static unsigned int  scMaxThreshhold=0;
 static uint32_t scHundredMicroseconds;
-static int adct[400]={0};
 static unsigned char scHundredMicroseconds1stByte;      // First Byte for Milliseconds 
 static unsigned char scHundredMicroseconds2ndByte;       // Second Byte for Milliseconds
 static unsigned char scHundredMicroseconds3rdByte;
 static unsigned char scHundredMicroseconds4thByte; 
-static unsigned int  scADCValue[MAX_DATA_SIZE]; 
+static unsigned int  scADCValue[MAX_PACKET_SEQUENCE][MAX_DATA_SIZE]; 
 static unsigned char scabyResponseBuffer[MAX_PACKET_SIZE];
-static unsigned char scADCH[MAX_DATA_SIZE];
-static unsigned char scADCL[MAX_DATA_SIZE];
+static unsigned char scADCH[MAX_PACKET_SEQUENCE][MAX_DATA_SIZE];
+static unsigned char scADCL[MAX_PACKET_SEQUENCE][MAX_DATA_SIZE];
 static uint32_t scADCStartTime;
 /* -- STATIC FUNCTION PROTOTYPES -- */
 static void scMainInit(void);
@@ -131,7 +127,7 @@ static void scTransmit(BYTE *pbyTxBuffer, BYTE byLength);
 static BOOL scfReceive(RECEIVED_MESSAGE *stReceiveMessageBuffer);
 static unsigned int  scADCRead(WORD wChannel);
 static void scSpiltData(void);
-static void scAllocateRespondBuffer(void);
+static void scAllocateRespondBuffer(BYTE PacketSequence);
 static int scSelfCalibratingMax(WORD wADCChannel,BYTE CalibrateTimeMS );
 static void TimerInitiate (void);
 void _ISR _DefaultInterrupt(void);	// interrupt for Timer1, used for keeping time
@@ -185,7 +181,7 @@ static void scMainInit(void)
     MiApp_ConnectionMode(ENABLE_ALL_CONN);
 
     /* Initialize static variables */
-    scADCValue [MAX_DATA_SIZE] = 0 ;
+    scADCValue[MAX_PACKET_SEQUENCE][MAX_DATA_SIZE] = 0 ;
     scfSlaveStatus = SLAVE_NO_ACKNOWLEDGE;
 
     for (byI = 0; byI < sizeof(scabyResponseBuffer); byI++)
@@ -214,6 +210,7 @@ int main(void)
     SLAVE_STATES_E eSlaveStates = INACTIVE;
     ADC_STATES_E eADCStates = TIMER_INITIATE;
     BYTE byDataCount ;
+    BYTE byPacketSequence ;
     scMainInit();
     
     while(TRUE)
@@ -253,11 +250,10 @@ int main(void)
                         eADCStates = ADC_INITIATE;
                         break;
                     case ADC_INITIATE:
-                        scADCValue[0]=scADCRead(EXT_CHANNEL);
-                        scADCStartTime = scHundredMicroseconds;
-                        if(scADCValue[0]>scMaxThreshhold)
+                        scADCValue[0][0]=scADCRead(EXT_CHANNEL);           
+                        scADCStartTime = scHundredMicroseconds;            // ADC Start recording time 
+                        if(scADCValue[0][0]>scMaxThreshhold)
                             {
-//                               scADCStartTime = scHundredMicroseconds;    // ADC Start time in HundredMicroseconds range 
                                eADCStates = ADC_MEASURING;
                             }
                         else if(scHundredMicroseconds>600000)             // when the time is bigger than 60 seconds
@@ -266,26 +262,25 @@ int main(void)
                             }
                         break;
                     case ADC_MEASURING:
-                        for(byDataCount =1;byDataCount<MAX_DATA_SIZE;byDataCount++)
+                        for(byPacketSequence = 0;byPacketSequence<MAX_PACKET_SEQUENCE;byPacketSequence++)
                         {
-                            scADCValue[byDataCount] = scADCRead(EXT_CHANNEL);
+                            for(byDataCount =0;byDataCount<MAX_DATA_SIZE;byDataCount++)
+                            {
+                                scADCValue[byPacketSequence][byDataCount] = scADCRead(EXT_CHANNEL);
+                            }
                         }
+                        scSpiltData();                       
                         scfSlaveStatus = SLAVE_ACKNOWLEDGE;
                         eSlaveStates = INACTIVE;             
-//                        for(byDataCount =1;byDataCount<400;byDataCount++)
-//                        {
-//                            adct[byDataCount]=byDataCount;
-//                        }                                                      // this part is useless, just used to test it how many data this microcontroller can save 
                         break;
                 }        
                 break;
             case SLAVE_RES: //TODO: more work needed to make generic
-                scSpiltData();
-                scAllocateRespondBuffer();
+                scAllocateRespondBuffer(stReceivedMessage.Payload[SLAVE_ID_INDEX]);
                 scTransmit((BYTE *)&scabyResponseBuffer, MAX_PACKET_SIZE);
                 eSlaveStates = INACTIVE;
                 break;
-
+                
             default:
                 // Error case
                 eSlaveStates = INACTIVE;
@@ -324,7 +319,7 @@ static SLAVE_STATES_E sceConvertCommandToState(const COMMANDS_E keCommand)
         case REQ_STATUS_CMD:
             eSlaveState = SLAVE_RES;
             break;
-
+                        
         default:
             // Error case
             eSlaveState = INACTIVE;
@@ -401,6 +396,7 @@ static BOOL scfReceive(RECEIVED_MESSAGE * stReceiveMessageBuffer)
     return fRetVal;
 }
 
+
 /*----------------------------------------------------------------------------
  
 @Prototype: static int scu32ADCRead(WORD wADCChannel)
@@ -438,7 +434,7 @@ static unsigned int scADCRead(WORD wADCChannel)
     DelayMs(1);
 //    for(wI = 0; wI < 150; wI++)                                     // delay around 100 us 
    
-//      Delay10us(50);
+//      Delay10us(100);
     return LOCAL_ADCVal;
 }
 /*----------------------------------------------------------------------------
@@ -460,24 +456,29 @@ DATE             NAME               REVISION COMMENT
 static void scSpiltData(void)
 {
     BYTE bySpiltDataCount;
-    for (bySpiltDataCount=0;bySpiltDataCount<MAX_DATA_SIZE;bySpiltDataCount++)
+    BYTE byPacketSequence;
+    for (byPacketSequence;byPacketSequence<MAX_PACKET_SEQUENCE;byPacketSequence++)
     {
-        scADCH[bySpiltDataCount] = scADCValue[bySpiltDataCount] >> 8;
-        scADCL[bySpiltDataCount] = scADCValue[bySpiltDataCount]; 
+        for (bySpiltDataCount=0;bySpiltDataCount<MAX_DATA_SIZE;bySpiltDataCount++)
+        {
+            scADCH[byPacketSequence][bySpiltDataCount] = scADCValue[byPacketSequence][bySpiltDataCount] >> 8;
+            scADCL[byPacketSequence][bySpiltDataCount] = scADCValue[byPacketSequence][bySpiltDataCount]; 
+        }
     }
    scHundredMicroseconds1stByte=scADCStartTime>>24;
    scHundredMicroseconds2ndByte=scADCStartTime>>16;
    scHundredMicroseconds3rdByte=scADCStartTime>>8;
    scHundredMicroseconds4thByte=scADCStartTime;
-  
 }
+
+
 /*----------------------------------------------------------------------------
  
 @Prototype: static void scAllocateRespondBuffer(void)
  
 @Description: allocate the ADC data to RespondBuffer
 
-@Parameters: None 
+@Parameters: BYTE, Packet Number 
  
 @Returns: None
            
@@ -487,23 +488,53 @@ DATE             NAME               REVISION COMMENT
 04/18/2017       Ruisi Ge           Initial Revision
 
 *----------------------------------------------------------------------------*/
-static void scAllocateRespondBuffer(void)
+static void scAllocateRespondBuffer(BYTE PacketSequence)
 {
     int DataCount;
     scabyResponseBuffer[SLAVE_ID_INDEX] = UNIQUE_SLAVE;
     scabyResponseBuffer[COMMAND_INDEX] = (BYTE)scfSlaveStatus;
+    scabyResponseBuffer[SEQUENCE_INDEX] = PacketSequence;
+    if (PacketSequence = 0)             // Packet zero contains four byte time header
+    {
     scabyResponseBuffer[TIME_1_BYTE] = scHundredMicroseconds1stByte;
     scabyResponseBuffer[TIME_2_BYTE] = scHundredMicroseconds2ndByte;
     scabyResponseBuffer[TIME_3_BYTE] = scHundredMicroseconds3rdByte;
     scabyResponseBuffer[TIME_4_BYTE] = scHundredMicroseconds4thByte;
     for (DataCount=0;DataCount< MAX_DATA_SIZE;DataCount++)
         {
-            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE] = scADCH[DataCount];
-            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE+1] = scADCL[DataCount];
+            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE+TIMEHEADERSIZE] = scADCH[PacketSequence][DataCount];
+            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE+TIMEHEADERSIZE+1] = scADCL[PacketSequence][DataCount];
         }
+    }
+    else
+    {
+        for(DataCount=0;DataCount< MAX_DATA_SIZE;DataCount++)
+        {
+            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE] = scADCH[PacketSequence][DataCount];
+            scabyResponseBuffer[2*DataCount+HEADERCOOMANDSIZE+1] = scADCL[PacketSequence][DataCount];
+        }
+    }
     
 }
 
+
+/*----------------------------------------------------------------------------
+ 
+@Prototype: static int scSelfCalibratingMax(WORD wADCChannel,BYTE CalibrateTimeMS )
+ 
+@Description: find the max value from SelfCalibratingMax
+
+@Parameters: WORD wADCChannel  - ADC Channel, 
+ *           BYTE CalibrateTimeMS  - Milliseconds in time to self calibrate
+ 
+@Returns: None
+           
+
+@Revision History:
+DATE             NAME               REVISION COMMENT
+04/18/2017       Ruisi Ge           Initial Revision
+
+*----------------------------------------------------------------------------*/
 static int scSelfCalibratingMax(WORD wADCChannel,BYTE CalibrateTimeMS )
 {
     /*Work to do, this function for now is use to simulate the process,need to work later*/
@@ -562,7 +593,6 @@ void _ISRFAST __attribute__((interrupt, auto_psv)) _T1Interrupt(void)
 {
     scHundredMicroseconds++;
    	IFS0bits.T1IF = 0;						// Clear Timer 1 interrupt flag
-//    TMR1 = 0x3CAF;       					// 0xFFFF - 0xC350 = 50,000 pulses = 100 msec count at Fosc=8MHz with Timer prescalar of 1:8  
 	TMR1 = 0xFFCD;                          //0XFFFF - 0x0050=50 pulses = 	100 usec count at Fosc = 8MHZ with Timer prescalar of 1:8; 
 	return;
 }
